@@ -1,0 +1,174 @@
+#!/bin/bash
+# Based on https://docs.djangoproject.com/en/1.9/intro/tutorial01/
+
+INFO_CLR='\033[0;32m'
+ERROR_CLR='\033[0;31m'
+SUCCESS_CLR='\033[0;32m'
+CMD_CLR='\033[0;37m'
+WARNING_CLR='\033[0;33m'
+N_CLR='\033[0m'
+
+[[ $# -eq 0 ]] && echo "Application name missing!" && exit 1
+
+APP=$1
+
+#############################################################################
+# Start Phase 1: Creating the project
+#############################################################################
+echo "Creating the project..."
+echo -n "Site name will be the name of the directory. "
+MYSITE=$(basename $(pwd))
+echo -e "Assign: ${CMD_CLR}${MYSITE}${N_CLR}"
+
+echo -e "Running command: ${CMD_CLR} django-admin startproject ${MYSITE}${N_CLR}"
+django-admin startproject $MYSITE
+[[ $? != 0 ]] && echo -e "${ERROR_CLR}Failed: Last command reported failure${N_CLR}" && exit 1
+[[ ! -f $MYSITE/manage.py ]] && echo -e "${ERROR_CLR}Failed: $MYSITE/manage.py does not exits${N_CLR}" && exit 1
+
+echo
+echo -e "Renaming top directory from ${CMD_CLR}${MYSITE}${N_CLR} to ${CMD_CLR}source${N_CLR}"
+mv $MYSITE source || (echo -e "${ERROR_CLR}Failed to rename ${MYSITE}${N_CLR}" && exit 1)
+cd source || (echo -e "${ERROR_CLR}Failed to change directory${N_CLR}" && exit 1)
+echo -e "Root directory of the project: ${CMD_CLR}source${N_CLR}"
+echo -e "Current directory: ${CMD_CLR} $(pwd)${N_CLR}"
+# End of Phase 1
+
+#############################################################################
+# Start Phase 2: Creating the application and updating the files
+#############################################################################
+echo
+echo -e "Creating the Application ${CMD_CLR}${APP}${N_CLR}...${N_CLR}"
+echo -e "Running command: ${CMD_CLR} python manage.py startapp ${APP}${N_CLR}"
+python manage.py startapp $APP
+[[ $? != 0 ]] && echo -e "${ERROR_CLR}Failed: Last command reported failure${N_CLR}" && exit 1
+
+echo
+echo -e "Updating the view ${CMD_CLR}'${APP}/views.py'${N_CLR}...${N_CLR}"
+[[ ! -f $APP/views.py ]] && echo -e "${ERROR_CLR}Failed: File does not exist${N_CLR}" && exit 1
+# Let's write the first view
+cat > $APP/views.py <<EOF
+from django.shortcuts import render
+
+def index(request):
+    context = {}
+    return render(request, '$APP/index.html', context)
+EOF
+echo "Output:"
+pygmentize -g $APP/views.py
+
+echo
+echo -e "Creating the url ${CMD_CLR}'${APP}/urls.py'${N_CLR}...${N_CLR}"
+cat > ${APP}/urls.py <<EOF
+from django.conf.urls import url
+
+from . import views
+
+urlpatterns = [
+    url(r'^$', views.index, name='index'),
+    ]
+EOF
+echo "Output:"
+pygmentize -g $APP/urls.py
+
+echo
+echo -e "Updating ${CMD_CLR}'${MYSITE}/urls.py${N_CLR}"
+[[ ! -f $MYSITE/urls.py ]] && echo -e "${ERROR_CLR}Failed: File does not exist${N_CLR}" && exit 1
+echo -e "${INFO_CLR}INFO: The next step is to point the root URLconf at the ${APP}/urls module.${N_CLR}"
+cat > $MYSITE/urls.py <<EOF
+from django.conf.urls import include, url
+from django.contrib import admin
+
+# The include() function allows referencing other URLconfs. Note that the regular
+# expressions for the include() function doesn’t have a $ (end-of-string match
+# character) but rather a trailing slash.
+
+urlpatterns = [
+    url(r'^$APP/', include('$APP.urls')),
+    url(r'^$', include('$APP.urls')),
+    url(r'^admin/', admin.site.urls),
+]
+EOF
+echo "Output:"
+pygmentize -g $MYSITE/urls.py
+
+#### DATABASE set-up goes here
+echo
+echo -e "${WARNING_CLR}WARNING: Skipping database setup...${N_CLR}"
+
+echo
+echo -e "Updating ${CMD_CLR}${MYSITE}/settings.py ${N_CLR}with ${CMD_CLR}${APP}${N_CLR}"
+[[ ! -f $MYSITE/settings.py ]]\
+    && echo -e "${ERROR_CLR}Failed: File does not exist${N_CLR}"\
+    && exit 1
+
+echo "Removing temp files (Just make sure that we start from a clean slate)"
+if [[ -f /tmp/.django_create_app.tmp ]]; then
+    rm -f /tmp/.django_create_app.tmp\
+     || (echo -e "${ERROR_CLR}Failed to remove /tmp/.django_create_app.tmp${N_CLR}"\
+     && exit 1)
+fi
+if [[ -f /tmp/.found-dj ]]; then
+    rm -f /tmp/.found-dj\
+    || (echo -e "${ERROR_CLR}Failed to remove /tmp/.found-dj${N_CLR}"\
+    && exit 1)
+fi
+
+cat $MYSITE/settings.py | while read line
+do
+    echo $line >> /tmp/.django_create_app.tmp
+    if [[ $line == "INSTALLED_APPS = [" ]]; then
+        echo "'${APP}'," >> /tmp/.django_create_app.tmp
+        touch /tmp/.found-dj
+    fi
+done
+
+[[ ! -f /tmp/.found-dj ]]\
+    && echo -e "${ERROR_CLR}Failed to update $MYSITE/settings.py: String INSTALLED_APPS not found${N_CLR}"\
+    && exit 1
+cat < /tmp/.django_create_app.tmp > $MYSITE/settings.py
+[[ $? != 0 ]]\
+    && echo -e "${ERROR_CLR}Failed to update $MYSITE/settings.py: cat command failed${N_CLR}"\
+    && exit 1
+rm -f /tmp/.django_create_app.tmp /tmp/.found-dj
+[[ $? != 0 ]]\
+    && echo -e "${ERROR_CLR}Failed to remove tmp file /tmp/.django_create_app.tmp\
+    and/or /tmp/.found-dj${N_CLR}"\
+    && exit 1
+
+## Creating the templates
+echo -e "Create the template directory: ${CMD_CLR}${APP}/templates/${APP}${N_CLR}"
+mkdir -p $APP/templates/$APP\
+    || (echo -e "${ERROR_CLR}Failed to create directory${N_CLR}" && exit 1)
+[[ ! -d ${APP}/templates/${APP} ]]\
+    && echo -e "${ERROR_CLR}Failed: Templates directory does not exist!${N_CLR}"\
+    && exit 1
+# End of phase 2
+
+#############################################################################
+# Start Phase 3: Adding a CSS Framework
+#############################################################################
+# Case of Skeleton
+echo
+echo "Download and unzip Skeleton..."
+echo -n "Retrieving file from:"
+echo -e "${CMD_CLR} https://github.com/dhg/Skeleton/releases/download/2.0.4/Skeleton-2.0.4.zip${N_CLR}"
+wget -q https://github.com/dhg/Skeleton/releases/download/2.0.4/Skeleton-2.0.4.zip\
+    -O Skeleton.zip && unzip Skeleton.zip && rm Skeleton.zip
+
+echo
+echo -e "Moving all static file in templates directory."
+mv Skeleton*/* $APP/templates/$APP\
+    || (echo -e "${ERROR_CLR}Failed to move files${N_CLR}" && exit 1)
+[[ ! -f ${APP}/templates/${APP}/index.html ]]\
+    && echo -e "${ERROR_CLR}Failed: ${APP}/templates/${APP}index.html${N_CLF} does not exists"\
+    && exit 1
+
+echo "Cleaning the downloaded files..."
+rm -rf Skeleton* || (echo -e "${ERROR_CLR}Failed to remove files${N_CLR}" && exit 1)
+# End of phase 4
+
+#############################################################################
+# Start Phase 4: Running the server
+#############################################################################
+echo "Running the server on localhost"
+python manage.py runserver
